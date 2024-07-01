@@ -1,8 +1,43 @@
+import psycopg2
 import pymysql
 import csv
 import boto3
 import configparser
 
+# Redshift db connection 정보를 가져옴
+parser = configparser.ConfigParser()
+parser.read("../pipeline.conf")
+dbname = parser.get("aws_creds", "database")
+user = parser.get("aws_creds", "username")
+password = parser.get("aws_creds", "password")
+host = parser.get("aws_creds", "host")
+port = parser.get("aws_creds", "port")
+
+# Redshift 연결
+
+rs_conn = psycopg2.connect(
+    "dbname=" + dbname
+    + " user=" + user
+    + " password=" + password
+    + " host=" + host
+    + " port=" + port)
+
+rs_sql = """SELECT COALESCE(MAX(LastUpdated), '1900-01-01') FROM Orders;"""
+
+rs_cursor = rs_conn.cursor()
+rs_cursor.execute(rs_sql)
+result = rs_cursor.fetchone()
+
+# 오직 하나의 레코드만 반환됨
+
+print(result)
+last_updated_warehouse = result[0]
+
+rs_cursor.close()
+rs_conn.commit()
+
+
+# MySQL 연결 정보를 가져온 뒤 연결
 parser=configparser.ConfigParser()
 parser.read("../pipeline.conf")
 hostname = parser.get("mysql_config","hostname")
@@ -19,11 +54,11 @@ if conn is None :
 else :
   print("MySQL connection established!")
 
-m_query = "SELECT * FROM Orders;"
+m_query = """SELECT * FROM Orders WHERE LastUpdated > %s;"""
 local_filename = "order_extract.csv"
 
 m_cursor = conn.cursor()
-m_cursor.execute(m_query)
+m_cursor.execute(m_query, (last_updated_warehouse,))
 results = m_cursor.fetchall()
 
 with open(local_filename, 'w') as fp :
